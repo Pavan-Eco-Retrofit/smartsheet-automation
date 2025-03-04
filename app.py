@@ -107,18 +107,26 @@ def attach_excel_files_to_smartsheet(row_id_map):
     print("🎉 All files attached successfully!")
 
 
-@app.route("/webhook", methods=["GET","POST"])
+@app.route("/webhook", methods=["POST", "GET"])
 def webhook_listener():
-    """Listens for Smartsheet webhook triggers."""
-    print("📥 Webhook received!")
-    df, row_id_map = fetch_smartsheet_data()
+    """Handles Smartsheet webhook requests."""
+    
+    if request.method == "GET":
+        return "✅ Webhook is set up correctly!", 200  # For browser testing
 
-    if df is not None and not df.empty:
-        create_property_files(df)
-        attach_excel_files_to_smartsheet(row_id_map)
-        return jsonify({"message": "Files updated & attached!"}), 200
-    else:
-        return jsonify({"message": "No checked rows found!"}), 400
+    elif request.method == "POST":
+        data = request.get_json()
+        print("📥 Webhook received!", data)
+
+        # Proceed with processing webhook events...
+        df, row_id_map = fetch_smartsheet_data()
+        if df is not None and not df.empty:
+            create_property_files(df)
+            attach_excel_files_to_smartsheet(row_id_map)
+            return jsonify({"message": "Files updated & attached!"}), 200
+        else:
+            return jsonify({"message": "No checked rows found!"}), 400
+
 
 
 @app.route("/", methods=["GET"])

@@ -109,13 +109,15 @@ def attach_excel_files_to_smartsheet(row_id_map):
 
 @app.route("/webhook", methods=["POST", "GET"])
 def webhook_listener():
-    """Handles Smartsheet webhook requests."""
-    
+    """Handles Smartsheet webhook verification and events."""
+
     if request.method == "GET":
         challenge = request.args.get("smartsheetHookChallenge")
         if challenge:
-            return challenge, 200  # ✅ Respond with the challenge string for verification!
-        return "✅ Webhook is set up correctly!", 200  # For browser testing
+            print(f"✅ Responding to Smartsheet verification with challenge: {challenge}")
+            return challenge, 200  # ✅ Send back challenge string as plain text
+
+        return "Webhook is running!", 200  # Fallback response
 
     elif request.method == "POST":
         data = request.get_json()
@@ -133,7 +135,6 @@ def webhook_listener():
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Smartsheet Automation is Running!", 200
-
 
 if __name__ == "__main__":
     app.run(debug=True)

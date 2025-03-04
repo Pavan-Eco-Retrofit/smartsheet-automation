@@ -112,6 +112,9 @@ def webhook_listener():
     """Handles Smartsheet webhook requests."""
     
     if request.method == "GET":
+        challenge = request.args.get("smartsheetHookChallenge")
+        if challenge:
+            return challenge, 200  # ✅ Respond with the challenge string for verification!
         return "✅ Webhook is set up correctly!", 200  # For browser testing
 
     elif request.method == "POST":
@@ -126,8 +129,6 @@ def webhook_listener():
             return jsonify({"message": "Files updated & attached!"}), 200
         else:
             return jsonify({"message": "No checked rows found!"}), 400
-
-
 
 @app.route("/", methods=["GET"])
 def home():

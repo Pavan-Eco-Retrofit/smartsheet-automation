@@ -11,8 +11,8 @@ app = Flask(__name__)
 API_KEY = os.getenv("SMARTSHEET_API_KEY")  # Use environment variable
 SHEET_ID = int(os.getenv("SMARTSHEET_SHEET_ID"))  # Store as env variable
 
-TEMPLATE_PATH = r"data\Updated Schedule.xlsx"  # Keep this file in your project folder
-OUTPUT_DIRECTORY = r"data\property_folders"  # Directory to store generated files
+TEMPLATE_PATH = r"Updated Schedule.xlsx"  # Keep this file in your project folder
+OUTPUT_DIRECTORY = r"property_folders"  # Directory to store generated files
 
 # Initialize Smartsheet client
 client = smartsheet.Smartsheet(API_KEY)
@@ -107,7 +107,7 @@ def attach_excel_files_to_smartsheet(row_id_map):
     print("🎉 All files attached successfully!")
 
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/webhook", methods=["GET","POST"])
 def webhook_listener():
     """Listens for Smartsheet webhook triggers."""
     print("📥 Webhook received!")

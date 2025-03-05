@@ -2,6 +2,7 @@ import os
 import shutil
 import openpyxl
 import smartsheet
+import pandas as pd
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -14,25 +15,36 @@ TEMPLATE_PATH = r"Updated Schedule.xlsx"  # Keep this file in your project folde
 OUTPUT_DIRECTORY = r"property_folders"  # Directory to store generated files
 
 # Initialize Smartsheet client
-client = smartsheet.Smartsheet(API_KEY, api_base="https://api.smartsheet.eu/2.0")
-client.errors_as_exceptions(True)  # Raise exceptions for better error handling
+client = smartsheet.Smartsheet(API_KEY)
+client.errors_as_exceptions(True)
 
 
-def create_property_file(row_data):
-    """Generate Excel file for the specific row."""
-    property_address = row_data.get("Property Address")
-    if not property_address:
-        return
+def fetch_smartsheet_data():
+    """Fetch data from Smartsheet where 'Check Box' is checked."""
+    try:
+        sheet = client.Sheets.get_sheet(SHEET_ID)
+        column_map = {col.id: col.title for col in sheet.columns}
+        sheet_data, row_id_map = [], {}
 
-    property_folder = os.path.join(OUTPUT_DIRECTORY, property_address)
-    os.makedirs(property_folder, exist_ok=True)
-    property_file_path = os.path.join(property_folder, f"{property_address}.xlsx")
-    shutil.copy(TEMPLATE_PATH, property_file_path)
+        for row in sheet.rows:
+            row_data = {column_map[cell.column_id]: cell.value for cell in row.cells if cell.value}
+            if row_data.get("Check Box") is True:
+                sheet_data.append(row_data)
+                if "Property Address" in row_data:
+                    row_id_map[row_data["Property Address"]] = row.id
 
-    wb = openpyxl.load_workbook(property_file_path)
-    ws = wb.active
+        return pd.DataFrame(sheet_data), row_id_map
 
-    # Mapping the data to the respective cell positions in the template
+    except smartsheet.exceptions.ApiError as e:
+        print(f"❌ Smartsheet API Error: {e}")
+        return None, {}
+
+
+def create_property_files(df):
+    """Generate Excel files for each checked property row."""
+    if not os.path.exists(OUTPUT_DIRECTORY):
+        os.makedirs(OUTPUT_DIRECTORY)
+
     mapping_positions = {
         "Property Address": "B3",
         "Local authority": "B5",
@@ -40,22 +52,48 @@ def create_property_file(row_data):
         "Tenure": "B7",
     }
 
-    for key, cell_ref in mapping_positions.items():
-        if key in row_data and row_data[key]:
-            ws[cell_ref] = row_data[key]
+    for _, row in df.iterrows():
+        property_address = row.get("Property Address")
+        if not property_address:
+            continue
 
-    wb.save(property_file_path)
+        property_folder = os.path.join(OUTPUT_DIRECTORY, property_address)
+        os.makedirs(property_folder, exist_ok=True)
+        property_file_path = os.path.join(property_folder, f"{property_address}.xlsx")
+        shutil.copy(TEMPLATE_PATH, property_file_path)
 
-    return property_file_path
+        wb = openpyxl.load_workbook(property_file_path)
+        ws = wb.active
+
+        for key, cell_ref in mapping_positions.items():
+            if key in row and row[key]:
+                ws[cell_ref] = row[key]
+
+        wb.save(property_file_path)
+
+    print("✅ Excel files generated successfully.")
 
 
-def attach_excel_file_to_smartsheet(property_address, row_id):
-    """Attach generated Excel file to corresponding Smartsheet row."""
-    property_folder = os.path.join(OUTPUT_DIRECTORY, property_address)
-    excel_file_path = os.path.join(property_folder, f"{property_address}.xlsx")
+def attach_excel_files_to_smartsheet(row_id_map):
+    """Attach generated Excel files to corresponding Smartsheet rows."""
+    for property_folder in os.listdir(OUTPUT_DIRECTORY):
+        folder_path = os.path.join(OUTPUT_DIRECTORY, property_folder)
 
-    if os.path.exists(excel_file_path):
+        if not os.path.isdir(folder_path):
+            continue
+
+        excel_files = [f for f in os.listdir(folder_path) if f.endswith(".xlsx") and not f.startswith("~$")]
+        if not excel_files:
+            continue
+
+        excel_file_path = os.path.join(folder_path, excel_files[0])
+        row_id = row_id_map.get(property_folder, None)
+
+        if not row_id:
+            continue
+
         print(f"📤 Attaching {excel_file_path} to Smartsheet row {row_id}")
+
         try:
             with open(excel_file_path, 'rb') as file:
                 client.Attachments.attach_file_to_row(
@@ -65,63 +103,36 @@ def attach_excel_file_to_smartsheet(property_address, row_id):
             print(f"✅ Successfully attached: {excel_file_path}")
         except smartsheet.exceptions.ApiError as e:
             print(f"❌ Smartsheet API Error: {e}")
-    else:
-        print(f"❌ Excel file not found: {excel_file_path}")
+
+    print("🎉 All files attached successfully!")
 
 
 @app.route("/webhook", methods=["POST", "GET"])
 def webhook_listener():
-    """Handles Smartsheet webhook verification and events."""
-
+    """Handles Smartsheet webhook requests."""
+    
     if request.method == "GET":
         challenge = request.args.get("smartsheetHookChallenge")
         if challenge:
-            print(f"✅ Responding to Smartsheet verification with challenge: {challenge}")
-            return challenge, 200  # ✅ Send back challenge string as plain text
-
-        return "Webhook is running!", 200  # Fallback response
+            return challenge, 200  # ✅ Respond with the challenge string for verification!
+        return "✅ Webhook is set up correctly!", 200  # For browser testing
 
     elif request.method == "POST":
         data = request.get_json()
         print("📥 Webhook received!", data)
 
-        # Extract the event details from the webhook payload
-        for event in data.get('events', []):
-            row_id = event.get('rowId')
-            changed_columns = event.get('changedColumns', [])
-
-            # Check if the "Check Box" column was changed
-            for column in changed_columns:
-                if column.get('columnTitle') == 'Check Box' and column.get('newValue') == 'TRUE':
-                    # Only process this row if the checkbox was checked
-                    print(f"✅ 'Check Box' checked for row ID: {row_id}")
-
-                    # Fetch the specific row data from Smartsheet
-                    try:
-                        row = client.Sheets.get_row(SHEET_ID, row_id)
-                        row_data = {cell.column_title: cell.value for cell in row.cells}
-
-                        # If "Check Box" is checked, create the Excel file and attach it
-                        if row_data.get("Check Box") is True:
-                            # Create the file for this row
-                            file_path = create_property_file(row_data)
-                            # Attach the file to Smartsheet
-                            attach_excel_file_to_smartsheet(row_data["Property Address"], row_id)
-                            
-                            return jsonify({"message": "File updated & attached!"}), 200
-                        else:
-                            return jsonify({"message": "Checkbox unchecked, no action taken."}), 200
-                    except smartsheet.exceptions.ApiError as e:
-                        print(f"❌ Error fetching row data: {e}")
-                        return jsonify({"message": "Error processing row."}), 500
-
-        return jsonify({"message": "No relevant events found."}), 400
-
+        # Proceed with processing webhook events...
+        df, row_id_map = fetch_smartsheet_data()
+        if df is not None and not df.empty:
+            create_property_files(df)
+            attach_excel_files_to_smartsheet(row_id_map)
+            return jsonify({"message": "Files updated & attached!"}), 200
+        else:
+            return jsonify({"message": "No checked rows found!"}), 400
 
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Smartsheet Automation is Running!", 200
-
 
 if __name__ == "__main__":
     app.run(debug=True)

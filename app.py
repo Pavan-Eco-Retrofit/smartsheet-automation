@@ -31,7 +31,7 @@ def register_webhook():
         "callbackUrl": WEBHOOK_URL,
         "scope": "sheet",
         "scopeObjectId": SHEET_ID,
-        "events": ["UPDATE", "ADD_ROW", "DELETE_ROW"],
+        "events": ["*.*"],
         "version": 1,
         "enabled": True
     }

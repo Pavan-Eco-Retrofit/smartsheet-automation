@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
- === Configuration ===
+# === Configuration ===
 API_KEY = os.getenv("SMARTSHEET_API_KEY")  # Use environment variable
 SHEET_ID = int(os.getenv("SMARTSHEET_SHEET_ID"))  # Store as env variable 
 
@@ -15,8 +15,8 @@ TEMPLATE_PATH = r"Updated Schedule.xlsx"  # Keep this file in your project folde
 OUTPUT_DIRECTORY = r"property_folders"  # Directory to store generated files
 
 # Initialize Smartsheet client
-client = smartsheet.Smartsheet(API_KEY)
-client.errors_as_exceptions(True)
+client = smartsheet.Smartsheet(API_KEY, api_base="https://api.smartsheet.eu/2.0")  # Use EU API base if required
+client.errors_as_exceptions(True)  # Raise exceptions for better error handling
 
 
 def fetch_smartsheet_data():

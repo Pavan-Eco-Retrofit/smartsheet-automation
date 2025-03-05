@@ -3,6 +3,7 @@ import shutil
 import openpyxl
 import smartsheet
 import pandas as pd
+import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -10,13 +11,73 @@ app = Flask(__name__)
 # === Configuration ===
 API_KEY = os.getenv("SMARTSHEET_API_KEY")  # Use environment variable
 SHEET_ID = int(os.getenv("SMARTSHEET_SHEET_ID"))  # Store as env variable
-
-TEMPLATE_PATH = r"Updated Schedule.xlsx"  # Keep this file in your project folder
-OUTPUT_DIRECTORY = r"property_folders"  # Directory to store generated files
+WEBHOOK_URL = "https://web-production-f336.up.railway.app/webhook"
+TEMPLATE_PATH = r"Updated Schedule.xlsx"
+OUTPUT_DIRECTORY = r"property_folders"
 
 # Initialize Smartsheet client
-client = smartsheet.Smartsheet(API_KEY)
-client.errors_as_exceptions(True)
+client = smartsheet.Smartsheet(API_KEY, api_base="https://api.smartsheet.eu/2.0")  # Use EU API base if required
+client.errors_as_exceptions(True)  # Raise exceptions for better error handling
+
+
+def register_webhook():
+    """Automatically register or update the webhook."""
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "name": "Auto Property Webhook",
+        "callbackUrl": WEBHOOK_URL,
+        "scope": "sheet",
+        "scopeObjectId": SHEET_ID,
+        "events": ["UPDATE", "ADD_ROW", "DELETE_ROW"],
+        "version": 1,
+        "enabled": True
+    }
+
+    # Check if webhook exists
+    response = requests.get("https://api.smartsheet.com/2.0/webhooks", headers=headers)
+    if response.status_code == 200:
+        webhooks = response.json().get("data", [])
+        for webhook in webhooks:
+            if webhook["callbackUrl"] == WEBHOOK_URL:
+                print("✅ Webhook already exists. Updating...")
+                update_payload = {"enabled": True}
+                requests.put(f"https://api.smartsheet.com/2.0/webhooks/{webhook['id']}", json=update_payload, headers=headers)
+                return
+
+    # Register a new webhook if not found
+    print("🚀 Registering new webhook...")
+    response = requests.post("https://api.smartsheet.com/2.0/webhooks", json=payload, headers=headers)
+    if response.status_code == 200:
+        print("✅ Webhook registered successfully!")
+    else:
+        print("❌ Webhook registration failed:", response.text)
+
+
+@app.route("/webhook", methods=["POST", "GET"])
+def webhook_listener():
+    """Handles Smartsheet webhook requests."""
+    
+    if request.method == "GET":
+        challenge = request.args.get("smartsheetHookChallenge")
+        if challenge:
+            return challenge, 200  # ✅ Respond with the challenge string for verification!
+        return "✅ Webhook is set up correctly!", 200
+
+    elif request.method == "POST":
+        data = request.get_json()
+        print("📥 Webhook received!", data)
+
+        # Proceed with processing webhook events...
+        df, row_id_map = fetch_smartsheet_data()
+        if df is not None and not df.empty:
+            create_property_files(df)
+            attach_excel_files_to_smartsheet(row_id_map)
+            return jsonify({"message": "Files updated & attached!"}), 200
+        else:
+            return jsonify({"message": "No checked rows found!"}), 400
 
 
 def fetch_smartsheet_data():
@@ -107,32 +168,11 @@ def attach_excel_files_to_smartsheet(row_id_map):
     print("🎉 All files attached successfully!")
 
 
-@app.route("/webhook", methods=["POST", "GET"])
-def webhook_listener():
-    """Handles Smartsheet webhook requests."""
-    
-    if request.method == "GET":
-        challenge = request.args.get("smartsheetHookChallenge")
-        if challenge:
-            return challenge, 200  # ✅ Respond with the challenge string for verification!
-        return "✅ Webhook is set up correctly!", 200  # For browser testing
-
-    elif request.method == "POST":
-        data = request.get_json()
-        print("📥 Webhook received!", data)
-
-        # Proceed with processing webhook events...
-        df, row_id_map = fetch_smartsheet_data()
-        if df is not None and not df.empty:
-            create_property_files(df)
-            attach_excel_files_to_smartsheet(row_id_map)
-            return jsonify({"message": "Files updated & attached!"}), 200
-        else:
-            return jsonify({"message": "No checked rows found!"}), 400
-
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Smartsheet Automation is Running!", 200
 
+
 if __name__ == "__main__":
+    register_webhook()  # Auto-register webhook when the app starts
     app.run(debug=True)
